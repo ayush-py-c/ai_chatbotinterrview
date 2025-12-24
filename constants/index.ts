@@ -1,6 +1,13 @@
 // import { CreateAssistantDTO } from "@vapi-ai/web/dist/api";
 // import { z } from "zod";
 
+export enum CallStatus {
+  INACTIVE = 'INACTIVE',
+  ACTIVE = 'ACTIVE',
+  CONNECTING = 'CONNECTING',
+  FINISHED = 'FINISHED',
+}
+
 export const mappings = {
   "react.js": "react",
   reactjs: "react",

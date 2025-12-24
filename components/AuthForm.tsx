@@ -3,8 +3,9 @@ import Image from "next/image"
 import { zodResolver} from "@hookform/resolvers/zod"
 import { useForm, FormProvider } from "react-hook-form"
 import {z} from "zod"
-
-
+// import { Auth } from "firebase-admin/auth"
+import { auth } from "@/firebase/client";
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from "firebase/auth"; //changes done in the next line also. 
 import { Button } from "@/components/ui/button"
 
 import { Input } from "@/components/ui/input"
@@ -13,13 +14,15 @@ import { toast } from "sonner"
 import FormField from "./FormField"
 import { Import } from "lucide-react"
 import { useRouter } from "next/navigation"
-
+import { create } from "domain"
+import { sign } from "crypto"
+import { signUp, signIn } from "@/lib/actions/auth.action"
 
 
 const authFormSchema = (type: FormType) => {
     return z.object({
-        username: z.string().min(2).max(50),
-        email: type === "sign-in" ? z.string().email() : z.string().email().optional(),
+        ...(type === "sign-in" && { username: z.string().min(2).max(50) }),
+        email:  z.string().email(),
         password: z.string().min(6),
     })
     }
@@ -36,16 +39,77 @@ const AuthForm = ({type}:{type:FormType}) => {
         password: "",
         },
     })
-    function onSubmit(values: z.infer<typeof formSchema>) {
+    async function onSubmit(values: z.infer<typeof formSchema>) {
         console.log("Form submitted", values);
         try {
            if (type === "sign-up") {
+            const {username,email,password} = values;
+            const userCredentials = await createUserWithEmailAndPassword(auth,email,password);
+            const result = await signUp({
+                uid: userCredentials.user.uid,
+                name: typeof username === 'string' ? username : "",
+                email,
+                password,
+            })
+            if(!result?.success){
+                toast.error(result?.message);
+                return;
+            }
+            
             toast.success("Account created successfully! Please sign in to continue.");
             router.push("/sign-in");
            }else {
-            toast.success("Sign in successful!");  
-            console.log("Redirecting to home page...");
-            // router.push("/");
+            const {email,password} = values;
+            try {
+                // First ensure auth is initialized
+                if (!auth) {
+                    toast.error("Authentication service not initialized");
+                    return;
+                }
+
+                // Attempt sign in
+                console.log("Attempting sign in...");
+                const userCredential = await signInWithEmailAndPassword(auth, email, password);
+                console.log("Sign in successful, getting user...");
+                
+                if (!userCredential?.user) {
+                    toast.error("Sign in failed - no user data received");
+                    return;
+                }
+
+                console.log("Getting ID token...");
+                const idToken = await userCredential.user.getIdToken();
+                
+                if (!idToken) {
+                    toast.error("Failed to get authentication token");
+                    return;
+                }
+
+                console.log("Calling server-side sign in...");
+                const signInResult = await signIn({email, idToken});
+                
+                if (!signInResult?.success) {
+                    toast.error(signInResult?.message || "Sign in failed");
+                    return;
+                }
+
+                toast.success("Sign in successful!");
+                console.log("Redirecting to home page...");
+                router.push("/");
+            } catch (signInError: any) {
+                console.error("Sign in error:", signInError);
+                let errorMessage = "Sign in failed";
+                
+                if (signInError.code === "auth/user-not-found") {
+                    errorMessage = "No account found with this email";
+                } else if (signInError.code === "auth/wrong-password") {
+                    errorMessage = "Incorrect password";
+                } else if (signInError.code === "auth/invalid-email") {
+                    errorMessage = "Invalid email format";
+                }
+                
+                toast.error(errorMessage);
+            }
               }
             // Handle form submission logic here
         } catch (error) {
@@ -77,6 +141,7 @@ const AuthForm = ({type}:{type:FormType}) => {
                         label="Email" 
                         placeholder = "Your Email"
                         type="email"
+                        // type  = "email"/
                     /> 
                     <FormField 
                         control={form.control}
@@ -85,7 +150,7 @@ const AuthForm = ({type}:{type:FormType}) => {
                         placeholder = "Your Password"
                         type="password"
                     />
-                    <Button className="btn" type="submit">{isSignIn?'Sign in':'Create an account'}</Button>
+                    <Button className="btn" type="button" onClick={()=>onSubmit(form.getValues())}>{isSignIn?'Sign in':'Create an account'}</Button>
                 </form>
             </FormProvider>
             <p className="text-center">
